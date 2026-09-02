@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ledger Assistant — Income & Expense Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#1c2b2d;
+    --paper:#f7f4ec;
+    --panel:#ffffff;
+    --line:#d8d2c2;
+    --moss:#2f5d50;
+    --gold:#b8863b;
+    --rust:#a3432f;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family: Georgia, 'Source Serif 4', serif;
+  }
+  header{
+    padding:28px 32px 18px;
+    border-bottom:2px solid var(--ink);
+  }
+  header h1{
+    margin:0;
+    font-size:28px;
+    letter-spacing:0.5px;
+  }
+  header p{
+    margin:6px 0 0;
+    font-size:14px;
+    color:#4a5a5c;
+    font-family: 'Courier New', monospace;
+  }
+  .layout{
+    display:grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap:22px;
+    padding:24px 32px 40px;
+  }
+  @media (max-width: 880px){
+    .layout{grid-template-columns:1fr;}
+  }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:18px 20px;
+    margin-bottom:20px;
+  }
+  .stats{
+    display:grid;
+    grid-template-columns: repeat(3,1fr);
+    gap:12px;
+    margin-bottom:20px;
+  }
+  .stat{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-left:4px solid var(--moss);
+    padding:14px 16px;
+    border-radius:4px;
+  }
+  .stat.expense{border-left-color:var(--rust);}
+  .stat.profit{border-left-color:var(--gold);}
+  .stat .label{
+    font-family:'Courier New', monospace;
+    font-size:11px;
+    color:#6b6b6b;
+  }
+  .stat .value{
+    font-family:'Courier New', monospace;
+    font-size:22px;
+    margin-top:4px;
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-family:'Courier New', monospace;
+    font-size:13px;
+  }
+  th,td{
+    text-align:left;
+    padding:6px 8px;
+    border-bottom:1px solid var(--line);
+  }
+  th{color:#6b6b6b;font-weight:normal;}
+  tr.income td.amt{color:var(--moss);}
+  tr.expense td.amt{color:var(--rust);}
+
+  #chatlog{
+    height:230px;
+    overflow-y:auto;
+    border:1px solid var(--line);
+    background:#fffdf8;
+    padding:10px 12px;
+    font-family:'Courier New', monospace;
+    font-size:13px;
+    border-radius:4px;
+  }
+  #chatlog .me{color:var(--ink); margin:8px 0 2px;}
+  #chatlog .bot{color:var(--moss); margin:0 0 8px; white-space:pre-wrap;}
+  .chatbar{
+    display:flex;
+    gap:8px;
+    margin-top:10px;
+  }
+  .chatbar input{
+    flex:1;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:4px;
+    font-family:'Courier New', monospace;
+    font-size:13px;
+  }
+  .chatbar button{
+    padding:9px 16px;
+    border:none;
+    background:var(--ink);
+    color:#fff;
+    border-radius:4px;
+    cursor:pointer;
+    font-family:'Courier New', monospace;
+  }
+  .hint{
+    font-size:12px;
+    color:#6b6b6b;
+    margin-top:8px;
+    font-family:'Courier New', monospace;
+  }
+  h2{
+    font-size:15px;
+    margin:0 0 12px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:#4a5a5c;
+  }
+  canvas{max-height:260px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ledger Assistant</h1>
+  <p>a small AI agent that reads your books and answers in charts</p>
+</header>
+
+<div class="layout">
+
+  <div>
+    <div class="stats">
+      <div class="stat"><div class="label">TOTAL INCOME</div><div class="value" id="statIncome">-</div></div>
+      <div class="stat expense"><div class="label">TOTAL EXPENSES</div><div class="value" id="statExpense">-</div></div>
+      <div class="stat profit"><div class="label">NET PROFIT</div><div class="value" id="statProfit">-</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Ledger (Journal)</h2>
+      <table>
+        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Amount</th></tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2 id="chartTitle">Expense Breakdown</h2>
+      <canvas id="mainChart"></canvas>
+    </div>
+
+    <div class="card">
+      <h2>Ask the Agent</h2>
+      <div id="chatlog"></div>
+      <div class="chatbar">
+        <input id="chatInput" type="text" placeholder="try: profit, expenses, income, add Sold candles, Sales, income, 4000">
+        <button onclick="handleInput()">Send</button>
+      </div>
+      <div class="hint">commands: summary / profit | expenses | income | add [desc], [category], [income|expense], [amount] | help</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ----- Sample data: 6 transactions (journal entries) -----
+let transactions = [
+  { date:"2026-08-01", desc:"Owner's capital deposit", category:"Capital", type:"income", amount:50000 },
+  { date:"2026-08-03", desc:"Sold handmade candles", category:"Sales", type:"income", amount:18000 },
+  { date:"2026-08-06", desc:"Bought raw wax & wicks", category:"Inventory", type:"expense", amount:9000 },
+  { date:"2026-08-10", desc:"Shop rent", category:"Rent", type:"expense", amount:12000 },
+  { date:"2026-08-14", desc:"Instagram ad boost", category:"Marketing", type:"expense", amount:3000 },
+  { date:"2026-08-20", desc:"Sold gift boxes", category:"Sales", type:"income", amount:9500 },
+];
+
+const ledgerBody = document.getElementById('ledgerBody');
+const statIncome = document.getElementById('statIncome');
+const statExpense = document.getElementById('statExpense');
+const statProfit = document.getElementById('statProfit');
+const chatlog = document.getElementById('chatlog');
+const chartTitle = document.getElementById('chartTitle');
+let chart;
+
+function fmt(n){ return "PKR " + n.toLocaleString(); }
+
+function totals(){
+  const income = transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const expense = transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  return { income, expense, profit: income - expense };
+}
+
+function renderLedger(){
+  ledgerBody.innerHTML = "";
+  transactions.forEach(t=>{
+    const tr = document.createElement('tr');
+    tr.className = t.type;
+    tr.innerHTML = `<td>${t.date}</td><td>${t.desc}</td><td>${t.category}</td><td>${t.type}</td><td class="amt">${t.type==='income'?'+':'-'}${fmt(t.amount)}</td>`;
+    ledgerBody.appendChild(tr);
+  });
+}
+
+function renderStats(){
+  const {income, expense, profit} = totals();
+  statIncome.textContent = fmt(income);
+  statExpense.textContent = fmt(expense);
+  statProfit.textContent = fmt(profit);
+}
+
+function drawChart(mode){
+  const ctx = document.getElementById('mainChart').getContext('2d');
+  if(chart) chart.destroy();
+
+  if(mode === "expenses"){
+    chartTitle.textContent = "Expense Breakdown by Category";
+    const cats = {};
+    transactions.filter(t=>t.type==="expense").forEach(t=>{
+      cats[t.category] = (cats[t.category]||0) + t.amount;
+    });
+    chart = new Chart(ctx, {
+      type:'pie',
+      data:{ labels:Object.keys(cats), datasets:[{ data:Object.values(cats),
+        backgroundColor:['#a3432f','#b8863b','#6b7f5a','#5c4b3a','#8a6a4f'] }] }
+    });
+  } else if(mode === "income"){
+    chartTitle.textContent = "Income Breakdown by Category";
+    const cats = {};
+    transactions.filter(t=>t.type==="income").forEach(t=>{
+      cats[t.category] = (cats[t.category]||0) + t.amount;
+    });
+    chart = new Chart(ctx, {
+      type:'pie',
+      data:{ labels:Object.keys(cats), datasets:[{ data:Object.values(cats),
+        backgroundColor:['#2f5d50','#4f7d6c','#7fa393','#b8c9bf'] }] }
+    });
+  } else {
+    chartTitle.textContent = "Income vs Expenses vs Profit";
+    const {income, expense, profit} = totals();
+    chart = new Chart(ctx, {
+      type:'bar',
+      data:{ labels:['Income','Expenses','Net Profit'],
+        datasets:[{ data:[income, expense, profit],
+          backgroundColor:['#2f5d50','#a3432f','#b8863b'] }] },
+      options:{ plugins:{legend:{display:false}} }
+    });
+  }
+}
+
+function say(who, text){
+  const div = document.createElement('div');
+  div.className = who;
+  div.textContent = (who==='me' ? '> ' : '') + text;
+  chatlog.appendChild(div);
+  chatlog.scrollTop = chatlog.scrollHeight;
+}
+
+function handleInput(){
+  const input = document.getElementById('chatInput');
+  const raw = input.value.trim();
+  if(!raw) return;
+  say('me', raw);
+  respond(raw);
+  input.value = "";
+}
+
+document.getElementById('chatInput').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') handleInput();
+});
+
+function respond(raw){
+  const text = raw.toLowerCase();
+
+  if(text === 'help'){
+    say('bot', "Commands:\n- summary / profit -> income vs expense vs profit chart\n- expenses -> pie chart of expense categories\n- income -> pie chart of income categories\n- add [desc], [category], [income|expense], [amount] -> record a new transaction");
+    return;
+  }
+
+  if(text.startsWith('add ')){
+    const parts = raw.slice(4).split(',').map(s=>s.trim());
+    if(parts.length !== 4){
+      say('bot', "Couldn't read that. Format: add [desc], [category], [income|expense], [amount]");
+      return;
+    }
+    const [desc, category, type, amountStr] = parts;
+    const amount = parseFloat(amountStr.replace(/[^\d.]/g,''));
+    if(!['income','expense'].includes(type.toLowerCase()) || isNaN(amount)){
+      say('bot', "Type must be 'income' or 'expense', and amount must be a number.");
+      return;
+    }
+    transactions.push({
+      date: new Date().toISOString().slice(0,10),
+      desc, category, type: type.toLowerCase(), amount
+    });
+    renderLedger();
+    renderStats();
+    drawChart('summary');
+    say('bot', `Recorded: ${desc} — ${type} of ${fmt(amount)} under ${category}. Ledger and charts updated.`);
+    return;
+  }
+
+  if(text.includes('expense')){
+    drawChart('expenses');
+    const {expense} = totals();
+    say('bot', `Total expenses so far: ${fmt(expense)}. Chart updated to expense breakdown.`);
+    return;
+  }
+
+  if(text.includes('income')){
+    drawChart('income');
+    const {income} = totals();
+    say('bot', `Total income so far: ${fmt(income)}. Chart updated to income breakdown.`);
+    return;
+  }
+
+  if(text.includes('profit') || text.includes('summary') || text.includes('loss')){
+    drawChart('summary');
+    const {income, expense, profit} = totals();
+    const verdict = profit >= 0 ? "a profit" : "a loss";
+    say('bot', `Income: ${fmt(income)} | Expenses: ${fmt(expense)} | Net result: ${fmt(Math.abs(profit))} (${verdict}).`);
+    return;
+  }
+
+  say('bot', "I didn't catch that. Type 'help' to see what I can do.");
+}
+
+// init
+renderLedger();
+renderStats();
+drawChart('summary');
+say('bot', "Hi! I'm your ledger assistant. Type 'help' to see what I can do.");
+</script>
+
+</body>
+</html>
